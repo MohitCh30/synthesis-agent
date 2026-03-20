@@ -1,6 +1,10 @@
-import logging
 import os
+import logging
 from typing import Optional
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from web3 import Web3
 from web3.exceptions import TimeExhausted, TransactionNotFound
@@ -19,16 +23,6 @@ CONTRACT_ABI = [
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
-    },
-    {
-        "anonymous": False,
-        "inputs": [
-            {"indexed": True, "internalType": "bytes32", "name": "hash", "type": "bytes32"},
-            {"indexed": True, "internalType": "address", "name": "sender", "type": "address"},
-            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"}
-        ],
-        "name": "ExecutionStored",
-        "type": "event"
     }
 ]
 
@@ -44,8 +38,9 @@ def get_web3() -> Optional[Web3]:
         try:
             _w3 = Web3(Web3.HTTPProvider(RPC_URL))
             if not _w3.is_connected():
-                logger.error("Failed to connect to RPC")
+                logger.warning("RPC connected but chain not reachable")
                 return None
+            logger.info(f"Web3 connected to {RPC_URL}")
         except Exception as e:
             logger.error(f"Web3 connection error: {e}")
             return None
@@ -53,15 +48,27 @@ def get_web3() -> Optional[Web3]:
 
 
 def store_execution_onchain(execution_hash: str) -> Optional[dict]:
-    if not all([RPC_URL, CONTRACT_ADDRESS, PRIVATE_KEY, WALLET_ADDRESS]):
-        logger.warning("On-chain configuration incomplete, skipping")
+    if not RPC_URL:
+        logger.warning("RPC_URL not set - skipping on-chain storage")
         return None
 
-    w3 = get_web3()
-    if not w3:
+    if not CONTRACT_ADDRESS:
+        logger.warning("CONTRACT_ADDRESS not set - skipping on-chain storage")
+        return None
+
+    if not PRIVATE_KEY:
+        logger.warning("PRIVATE_KEY not set - skipping on-chain storage")
+        return None
+
+    if not WALLET_ADDRESS:
+        logger.warning("WALLET_ADDRESS not set - skipping on-chain storage")
         return None
 
     try:
+        w3 = get_web3()
+        if not w3:
+            return None
+
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(CONTRACT_ADDRESS),
             abi=CONTRACT_ABI
@@ -78,11 +85,14 @@ def store_execution_onchain(execution_hash: str) -> Optional[dict]:
             'gasPrice': w3.eth.gas_price
         })
 
+        if not PRIVATE_KEY.startswith('0x'):
+            PRIVATE_KEY = '0x' + PRIVATE_KEY
+
         signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
 
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
         logger.info(f"Execution anchored on-chain: {tx_hash.hex()}")
 
@@ -95,7 +105,7 @@ def store_execution_onchain(execution_hash: str) -> Optional[dict]:
 
     except TimeExhausted:
         logger.warning(f"Transaction timeout for hash {execution_hash[:16]}...")
-        return {"tx_hash": None, "network": "base_sepolia", "status": "timeout", "error": "Transaction timeout"}
+        return {"tx_hash": None, "network": "base_sepolia", "status": "timeout"}
     except TransactionNotFound:
         logger.warning(f"Transaction not found for hash {execution_hash[:16]}...")
         return {"tx_hash": None, "network": "base_sepolia", "status": "pending"}
