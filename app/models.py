@@ -11,7 +11,7 @@ class AgentRequest(BaseModel):
         default="You are a Trustworthy AI Agent. Execute the task and honor all constraints. Be precise and honest.",
         description="Optional system prompt"
     )
-    model: str = Field(default="llama3-8b-8192", description="Groq model to use")
+    model: str = Field(default="llama-3.1-8b-instant", description="Groq model to use")
 
 
 class ConstraintsInfo(BaseModel):

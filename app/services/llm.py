@@ -6,7 +6,7 @@ from groq import Groq
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "llama3-8b-8192"
+DEFAULT_MODEL = "llama-3.1-8b-instant"
 
 
 class LLMService:
