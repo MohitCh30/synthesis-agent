@@ -120,6 +120,14 @@ Execution hashes are anchored on **Base Sepolia** for trustless verification.
 | Status | CONFIRMED |
 | Contract | `0x03Ce9c7C6441Bd274DC462d1c682F976ee695526` |
 
+### Transaction
+
+<img width="1385" height="898" alt="Screenshot From 2026-03-20 10-32-47" src="https://github.com/user-attachments/assets/6605121d-28f1-4db6-8d07-2b496a135916" /> 
+
+### Event Logs
+
+<img width="1396" height="575" alt="Screenshot From 2026-03-20 10-34-50" src="https://github.com/user-attachments/assets/1a4a9469-895b-4a1c-ac46-d2b8de0d54b0" />
+
 ### What Was Stored
 
 The execution hash of the AI agent's response to:
