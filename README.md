@@ -1,5 +1,36 @@
 # TrustAudit Agent
 
+**AI outputs you can verify, validate, and trust.**
+
+---
+
+## 🚀 Live Deployment
+
+**Base URL:** https://web-production-a7b03.up.railway.app/
+
+**Swagger UI:** https://web-production-a7b03.up.railway.app/docs
+
+> This project is fully deployed and publicly accessible. No local setup required.
+
+---
+
+## ⚠️ Important Note
+
+The project was initially designed for local execution (Ollama).
+Due to deployment requirements, it was migrated to a cloud-based architecture using **Groq API** + **Railway**.
+
+---
+
+## 🔍 What This Project Does
+
+- Executes LLM tasks with constraint awareness
+- Detects contradictory instructions
+- Computes trust score (0–1)
+- Logs execution with SHA256 hash
+- Anchors execution on blockchain (Base Sepolia)
+
+---
+
 ## The Problem
 
 AI agents make promises. They say "I'll answer in one word" and then ramble for 50 words. They claim to follow constraints but provide no proof. How can you trust an AI that can't verify its own behavior?
@@ -16,7 +47,7 @@ This agent doesn't just execute tasks. It proves it kept its promises.
 User Request → Agent Execution → Constraint Validation → Trust Score + Execution Hash
 ```
 
-1. **Execute**: Agent runs the task using local LLM (Mistral via Ollama)
+1. **Execute**: Agent runs the task using Groq LLM (llama-3.1-8b-instant)
 2. **Extract**: Parse constraints from natural language ("answer in 1 word", "YES or NO only")
 3. **Detect**: Find contradictory instructions before wasting compute
 4. **Validate**: Check output against all constraints
@@ -34,81 +65,50 @@ User Request → Agent Execution → Constraint Validation → Trust Score + Exe
 - **Verification Endpoint**: Recompute hash to detect tampering
 - **On-Chain Anchoring**: Execution proofs anchored on Base Sepolia
 
-## Tech Stack
+## 🧪 How to Use
 
-- **Backend**: FastAPI (Python)
-- **LLM**: Ollama with Mistral model (local, private)
-- **Database**: SQLite (immutable append-only logs)
-- **Blockchain**: Base Sepolia (on-chain execution anchoring)
-- **Hashing**: SHA256 for execution proofs
-- **Verification**: On-chain anchored execution proofs via smart contract
+### Option A — Swagger UI (Recommended)
 
-## Tracks
+Open https://web-production-a7b03.up.railway.app/docs and use **POST /agent/run**
 
-1. **Agents that Trust** — This agent builds trust through transparency, verification, and self-auditing
-2. **Agents that Cooperate** — Trust is essential for multi-agent cooperation; this system provides verifiable execution proofs
-
-## Quick Start
+### Option B — cURL
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Start Ollama (in background)
-ollama serve
-
-# Start the agent
-uvicorn app.main:app --reload
-
-# Test the agent
-curl -X POST http://localhost:8000/agent/run \
+curl -X POST https://web-production-a7b03.up.railway.app/agent/run \
   -H "Content-Type: application/json" \
   -d '{"input": "Is the sky blue? Answer YES or NO only."}'
 ```
 
-## Demo Flow
+### Option C — Python
 
-See `demo.sh` for a complete demonstration showing:
-1. Valid execution with trust_score = 1.0
-2. Constraint violation with trust_score = 0.5
-3. Contradiction detection before execution
-4. Verification endpoint to detect tampering
+```python
+import requests
 
-## Why This Matters
-
-In a world where AI agents make decisions, execute actions, and interact with each other, **trust is paramount**. TrustAudit Agent provides:
-
-- **Transparency**: Every execution is logged with full metadata
-- **Verification**: Hash-based proofs prevent tampering
-- **Accountability**: Trust scores hold the agent accountable for its outputs
-- **Interoperability**: Any party can verify execution integrity
-
-## Project Structure
-
-```
-synthesis-agent/
-├── app/
-│   ├── main.py              # FastAPI app
-│   ├── models.py            # Request/response schemas
-│   ├── routes/agent.py      # API endpoints
-│   ├── services/
-│   │   ├── constraints.py   # Constraint parsing & validation
-│   │   ├── logger.py       # Immutable logging
-│   │   ├── verifier.py     # Hash computation & verification
-│   │   ├── blockchain.py   # On-chain anchoring (Base Sepolia)
-│   │   └── llm.py         # Ollama integration
-│   └── db/database.py      # SQLite models
-├── contracts/
-│   └── ExecutionRegistry.sol  # Smart contract
-├── logs/                    # Append-only execution logs
-├── requirements.txt
-├── demo.sh                  # Demo script
-└── README.md
+response = requests.post(
+    "https://web-production-a7b03.up.railway.app/agent/run",
+    json={"input": "Say YES only"}
+)
+print(response.json())
 ```
 
-## On-Chain Verification
+---
 
-Execution hashes are anchored on **Base Sepolia** for trustless verification.
+## 📌 Sample Output Explained
+
+| Field | Description |
+|-------|-------------|
+| `valid` | Whether all constraints were satisfied |
+| `trust_score` | Reliability score (0.0 = failed, 1.0 = perfect) |
+| `reason` | Why the trust score changed (constraint violations) |
+| `execution_hash` | Unique SHA256 fingerprint of this execution |
+| `onchain.tx_hash` | Blockchain transaction hash for immutable proof |
+| `onchain.status` | "confirmed" if anchored on-chain |
+
+---
+
+## 🔗 Blockchain Verification
+
+Each execution can be anchored on **Base Sepolia** for tamper-proof verification.
 
 ### On-Chain Proof
 
@@ -120,36 +120,6 @@ Execution hashes are anchored on **Base Sepolia** for trustless verification.
 | Status | CONFIRMED |
 | Contract | `0x03Ce9c7C6441Bd274DC462d1c682F976ee695526` |
 
-### Transaction
-
-<img width="1385" height="898" alt="Screenshot From 2026-03-20 10-32-47" src="https://github.com/user-attachments/assets/6605121d-28f1-4db6-8d07-2b496a135916" /> 
-
-### Event Logs
-
-<img width="1396" height="575" alt="Screenshot From 2026-03-20 10-34-50" src="https://github.com/user-attachments/assets/1a4a9469-895b-4a1c-ac46-d2b8de0d54b0" />
-
-### What Was Stored
-
-The execution hash of the AI agent's response to:
-> "Approve treasury transfer of 5 ETH"
-
-Stored hash (keccak256):
-```
-0x2f9b41e20e681182ed318d7ca4721195e289bdc5150d253cb24eac6c724b85d7
-```
-
-### Smart Contract Event
-
-```solidity
-event ExecutionStored(
-    bytes32 indexed hash,
-    address indexed sender,
-    uint256 timestamp
-);
-```
-
-### Verification
-
 Anyone can verify by:
 1. Finding the `tx_hash` in the response
 2. Looking up the transaction on [Basescan](https://sepolia.basescan.org/tx/0x227446a3a6c0a34ddfd1f4cfb3c0298b57372a59364ac982c6a923561cb3f859)
@@ -157,35 +127,82 @@ Anyone can verify by:
 
 This provides **trustless verification** - no reliance on our server.
 
-### How It Works
+---
 
-1. Every execution generates a SHA256 hash: `SHA256(input | output | timestamp)`
-2. This hash is stored on-chain via `ExecutionRegistry` contract
-3. Transaction hash provides immutable proof of execution
-4. Anyone can verify by checking the contract events
+## ⚠️ Note on Database
 
-### Deployment
+SQLite is used for logging. Since Railway uses ephemeral storage, logs may reset on redeploy. For production, consider migrating to a persistent database.
+
+---
+
+## 🧠 Architecture
+
+| Component | Technology |
+|-----------|------------|
+| Backend | FastAPI (Python) |
+| LLM | Groq (llama-3.1-8b-instant) |
+| Database | SQLite |
+| Blockchain | Base Sepolia (Web3.py) |
+| Deployment | Railway |
+| Hashing | SHA256 |
+
+---
+
+## 🎯 Why This Matters
+
+In a world where AI agents make decisions, execute actions, and interact with each other, **trust is paramount**. Most AI systems produce outputs without accountability. **TrustAudit introduces validation, scoring, and verifiable proof** — so you never have to trust an AI blindly again.
+
+---
+
+## Tracks
+
+1. **Agents that Trust** — This agent builds trust through transparency, verification, and self-auditing
+2. **Agents that Cooperate** — Trust is essential for multi-agent cooperation; this system provides verifiable execution proofs
+
+---
+
+## Quick Start (Local Development)
 
 ```bash
-# Deploy contract to Base Sepolia
-# 1. Compile: npx hardhat compile
-# 2. Deploy: npx hardhat run scripts/deploy.js --network base_sepolia
+# Install dependencies
+pip install -r requirements.txt
 
-# Configure environment
+# Set environment variables
+export GROQ_API_KEY="your_groq_api_key"
 export RPC_URL="https://sepolia.base.org"
 export CONTRACT_ADDRESS="your_contract_address"
 export PRIVATE_KEY="your_private_key"
-export WALLET_ADDRESS="your_wallet_address"
+
+# Start the agent
+uvicorn app.main:app --reload
+
+# Test the agent
+curl -X POST http://localhost:8000/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Is the sky blue? Answer YES or NO only."}'
 ```
 
-### Verification
+## Project Structure
 
-Anyone can verify an execution by:
-1. Finding the `tx_hash` in the response
-2. Looking up the transaction on Basescan
-3. Confirming the `ExecutionStored` event with matching hash
-
-This provides **trustless verification** - no reliance on our server.
+```
+synthesis-agent/
+├── app/
+│   ├── main.py              # FastAPI app
+│   ├── models.py            # Request/response schemas
+│   ├── routes/agent.py      # API endpoints
+│   ├── services/
+│   │   ├── constraints.py   # Constraint parsing & validation
+│   │   ├── logger.py        # Immutable logging
+│   │   ├── verifier.py      # Hash computation & verification
+│   │   ├── blockchain.py     # On-chain anchoring (Base Sepolia)
+│   │   └── llm.py           # Groq integration
+│   └── db/database.py       # SQLite models
+├── contracts/
+│   └── ExecutionRegistry.sol  # Smart contract
+├── requirements.txt
+├── Procfile                   # Railway deployment
+└── README.md
+```
 
 ## License
 
