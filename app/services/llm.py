@@ -2,21 +2,34 @@ import os
 import logging
 from typing import Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from groq import Groq
 
 logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-DEFAULT_MODEL = "mistral-7b-instruct-v0.1"
+DEFAULT_MODEL = "mixtral-8x7b-32768"
 
 
 class LLMService:
     def __init__(self, api_key: str = None):
         self.api_key = api_key or GROQ_API_KEY
-        self.client = Groq(api_key=self.api_key) if self.api_key else None
+        self.client = None
+        if self.api_key:
+            try:
+                self.client = Groq(api_key=self.api_key)
+                logger.info(f"Groq client initialized with model: {DEFAULT_MODEL}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Groq client: {e}")
+        else:
+            logger.warning("GROQ_API_KEY not set - LLM calls will fail")
 
     def is_connected(self) -> bool:
         if not self.client:
+            logger.warning("Groq client not initialized")
             return False
         try:
             self.client.chat.completions.create(
