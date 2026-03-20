@@ -11,7 +11,7 @@ class AgentRequest(BaseModel):
         default="You are a Trustworthy AI Agent. Execute the task and honor all constraints. Be precise and honest.",
         description="Optional system prompt"
     )
-    model: str = Field(default="mistral", description="Ollama model to use")
+    model: str = Field(default="llama3-8b-8192", description="Groq model to use")
 
 
 class ConstraintsInfo(BaseModel):
@@ -74,8 +74,9 @@ class LogResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    ok: bool
     status: str
-    ollama_connected: bool
+    groq_connected: bool
     model: str
 
 

@@ -43,7 +43,7 @@ async def startup_event():
     logger.info("TrustAudit Agent starting up...")
     logger.info(f"Port: {PORT}")
     logger.info(f"Groq Model: {DEFAULT_MODEL}")
-    logger.info(f"Groq API: {'Configured' if llm_service.client else 'NOT CONFIGURED'}")
+    logger.info(f"Groq API: {'Configured' if os.getenv('GROQ_API_KEY') else 'NOT CONFIGURED'}")
     logger.info("=" * 50)
 
 
