@@ -25,11 +25,12 @@ async def run_agent(request: AgentRequest):
         raise HTTPException(status_code=400, detail="Input cannot be empty")
 
     task_id = str(uuid4())
-    constraints = parse_constraints(input_text)
+    combined_text = input_text + " " + (request.system_prompt or "")
+    constraints = parse_constraints(combined_text)
 
     logger.info(f"Task started: task_id={task_id}, constraints={constraints}")
 
-    contradiction_info = detect_contradictions(constraints, input_text)
+    contradiction_info = detect_contradictions(constraints, combined_text)
     contradiction_detected = contradiction_info["contradiction_detected"]
     contradiction_reason = contradiction_info["contradiction_reason"]
 
