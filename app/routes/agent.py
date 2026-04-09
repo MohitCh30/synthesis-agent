@@ -6,12 +6,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof
+from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse
 from app.services.llm import llm_service
 from app.services.logger import logger_service
 from app.services.constraints import parse_constraints, detect_contradictions, validate_output, calculate_trust_score
 from app.services.verifier import compute_execution_hash, verify_execution
 from app.services.blockchain import store_execution_onchain
+from app.services.classifier import classifier_service
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger(__name__)
@@ -151,6 +152,49 @@ async def run_agent(request: AgentRequest):
         logger.error(f"Task failed: task_id={task_id}, error={str(e)}")
 
         raise HTTPException(status_code=500, detail=f"LLM execution failed: {str(e)}")
+
+
+@router.post("/classify", response_model=ClassifyResponse)
+async def classify_prompt(request: ClassifyRequest):
+    prompt_raw = request.prompt
+    if len(prompt_raw.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    task_id = str(uuid4())
+    start_time = time.perf_counter()
+
+    try:
+        result = classifier_service.classify(prompt_raw)
+
+        end_time = time.perf_counter()
+        latency_ms = (end_time - start_time) * 1000
+
+        logger_service.append_log(
+            task_id=task_id,
+            input_text=prompt_raw,
+            output_text=f"verdict={result['verdict']} confidence={result['confidence']:.6f} prompt_hash={result['prompt_hash']}",
+            latency_ms=latency_ms,
+            status="success",
+            valid=True,
+            reason=None,
+            trust_score=result["confidence"],
+            trust_explanation=f"Prompt classified as {result['verdict']}",
+            contradiction_detected=False,
+            contradiction_reason=None,
+            violations=[]
+        )
+
+        return ClassifyResponse(
+            verdict=result["verdict"],
+            confidence=result["confidence"],
+            prompt_hash=result["prompt_hash"]
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Prompt classification failed: task_id={task_id}, error={str(e)}")
+        raise HTTPException(status_code=500, detail=f"Classification failed: {str(e)}")
 
 
 @router.get("/verify/{task_id}", response_model=VerificationResponse)

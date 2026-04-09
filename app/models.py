@@ -80,6 +80,16 @@ class HealthResponse(BaseModel):
     model: str
 
 
+class ClassifyRequest(BaseModel):
+    prompt: str = Field(..., description="Prompt to classify")
+
+
+class ClassifyResponse(BaseModel):
+    verdict: str = Field(..., description="SAFE or ADVERSARIAL")
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    prompt_hash: str = Field(..., min_length=64, max_length=64)
+
+
 class ErrorResponse(BaseModel):
     error: str
     status: str
