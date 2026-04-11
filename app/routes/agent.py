@@ -172,7 +172,13 @@ async def classify_prompt(request: ClassifyRequest):
         logger_service.append_log(
             task_id=task_id,
             input_text=prompt_raw,
-            output_text=f"verdict={result['verdict']} confidence={result['confidence']:.6f} prompt_hash={result['prompt_hash']}",
+            output_text=(
+                f"verdict={result['verdict']} confidence={result['confidence']:.6f} "
+                f"embedding={result['signals']['embedding']:.6f} "
+                f"base64={result['signals']['base64']:.6f} "
+                f"persona={result['signals']['persona']:.6f} "
+                f"length={result['signals']['length']:.6f}"
+            ),
             latency_ms=latency_ms,
             status="success",
             valid=True,
@@ -187,7 +193,7 @@ async def classify_prompt(request: ClassifyRequest):
         return ClassifyResponse(
             verdict=result["verdict"],
             confidence=result["confidence"],
-            prompt_hash=result["prompt_hash"]
+            signals=result["signals"]
         )
 
     except ValueError as e:

@@ -26,6 +26,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    import threading
+    from app.services.classifier import classifier_service
+    threading.Thread(target=classifier_service._prepare_model, daemon=True).start()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

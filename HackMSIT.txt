@@ -1,0 +1,70 @@
+PROJECT: TrustAudit Agent — Prompt Police 
+DATE: April 10, 2026
+
+--- ARCHITECTURE ---
+Describe the full system architecture including:
+* FastAPI backend with uvicorn
+* Classifier pipeline: sentence embeddings via all-MiniLM-L6-v2, 
+  XGBoost classifier, ensemble scoring
+* Three signal types: embedding, persona pattern matching, Base64 detection, length anomaly
+* Ensemble weights: embedding 0.4, persona 0.3, base64 0.2, length 0.1
+* Threshold: 0.29
+* joblib model persistence to classifier_model.joblib
+* HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE for offline inference
+* Groq llama-3.1-8b-instant for agent endpoint
+
+--- DATASETS ---
+* JailbreakBench/JBB-Behaviors: 100 adversarial behaviors
+* jackhhao/jailbreak-classification: ~1300 jailbreak prompts, 
+  filtered to "jailbreak" type only
+* Combined adversarial training examples: 751
+* OpenAssistant/oasst1: 84k benign prompts, sampled to 4000
+* 80/20 train/test split, stratified
+
+--- METRICS (evaluated at threshold 0.29) ---
+* F1 Score: 0.913
+* True Positive Rate (TPR): 0.873
+* False Positive Rate (FPR): 0.0075
+* Target was F1 > 0.90 and FPR < 0.01 — F1 hit, FPR hit, TPR 2.7% short
+
+--- STRENGTHS ---
+* Ambitious stretch tier implementation as per problem statement
+* Multi-signal ensemble mirrors production adversarial detection pipelines
+* XGBoost outperformed LogisticRegression on this task
+* Persona pattern matching catches DAN, developer mode, ignore previous 
+  instructions style attacks reliably
+* Base64 detection catches encoding obfuscation attacks
+* Sourdough-buried jailbreak caught correctly via persona signal
+* Model persisted to disk via joblib — server startup loads in under 2 seconds
+* Dataset supplemented beyond what problem statement provided
+* Real metrics computed on held-out test split, not training data
+
+--- WEAKNESSES ---
+* Embedding signal weak in practice: XGBoost probability scores near zero 
+  for most adversarial prompts, meaning detections rely on rule-based signals
+* TPR 87.3% is 2.7% below 90% target — root cause is small adversarial 
+  training set (751 examples)
+* Out-of-distribution semantic jailbreaks (creative roleplay, fictional 
+  story wrappers, no trigger keywords) likely bypass the system
+* No evaluation on truly novel out-of-distribution attack patterns
+* Single developer team
+
+--- KNOWN GAPS AND NEXT STEPS ---
+* Fine-tune the sentence encoder on adversarial prompts to improve 
+  embedding signal quality
+* Expand adversarial training data beyond 751 examples
+* Add multi-turn conversation context detection
+* Evaluate on AdvBench or WildJailbreak for out-of-distribution performance
+* Deploy to Railway with proper environment variable management
+
+--- WHAT TO TELL JUDGES ---
+* F1 0.913, FPR 0.75%, TPR 87.3% on held-out test split
+* Embedding weakness is a data problem not an architecture problem — 
+  JailbreakBench only has 100 behaviors, we supplemented to 751 but 
+  the adversarial space is much larger
+* Threshold tuning is legitimate ML practice — we tuned the operating 
+  point on the ROC curve to balance TPR and FPR
+* Why XGBoost: better decision boundaries on high-dimensional embedding 
+  space than logistic regression, validated empirically
+* Why ensemble: embeddings miss encoding tricks, rule-based signals catch 
+  what embeddings miss, no single method catches everything
