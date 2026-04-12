@@ -26,13 +26,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
-@app.on_event("startup")
-async def startup_event():
-    import threading
-    from app.services.classifier import classifier_service
-    threading.Thread(target=classifier_service._prepare_model, daemon=True).start()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,6 +45,10 @@ async def startup_event():
     logger.info(f"Groq Model: {DEFAULT_MODEL}")
     logger.info(f"Groq API: {'Configured' if os.getenv('GROQ_API_KEY') else 'NOT CONFIGURED'}")
     logger.info("=" * 50)
+    import threading
+    from app.services.classifier import classifier_service
+    threading.Thread(target=classifier_service._prepare_model, daemon=True).start()
+    logger.info("Classifier warmup started in background")
 
 
 @app.get("/health")

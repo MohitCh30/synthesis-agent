@@ -1,7 +1,4 @@
-import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-import base64
+import hashlib
 import logging
 import random
 import re
@@ -10,23 +7,14 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict, load_dataset
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics import f1_score, confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
-
-import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-
-
-MODEL_PATH = Path(__file__).parent / "classifier_model.joblib"
-FINETUNED_MODEL = "/home/mohitchaudhary/synthesis-agent/models/finetuned-jailbreak-detector/final"
-
 
 logger = logging.getLogger(__name__)
 
 
+MODEL_PATH = Path(__file__).parent / "classifier_model.joblib"
 BASE64_PATTERN = re.compile(r"(?:^|[^A-Za-z0-9+/=])([A-Za-z0-9+/]{24,}={0,2})(?=$|[^A-Za-z0-9+/=])")
 PERSONA_PATTERNS = [
     re.compile(r"\bdan\b", re.IGNORECASE),
@@ -51,235 +39,191 @@ PERSONA_PATTERNS = [
 
 
 class JailbreakClassifierService:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._trained = False
-        self._embedder: SentenceTransformer | None = None
-        self._model: XGBClassifier | None = None
+    """
+    Lazy-loading prompt classifier:
+    - Loads JailbreakBench/JBB-Behaviors from HuggingFace
+    - Embeds text with sentence-transformers/all-MiniLM-L6-v2
+    - Trains LogisticRegression classifier
+    """
 
-    @staticmethod
-    def _extract_text(row: dict[str, Any], keys: tuple[str, ...]) -> str:
-        for key in keys:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._ready = False
+        self._embedder = None
+        self._classifier = None
+
+    def _extract_text(self, row: dict[str, Any]) -> str:
+        for key in ("Behavior", "Goal", "prompt", "goal", "Target", "target_response"):
             value = row.get(key)
-            if isinstance(value, str):
-                text = value.strip()
-                if text:
-                    return text
+            if isinstance(value, str) and value.strip():
+                return value.strip()
         return ""
 
     @staticmethod
-    def _iter_rows(ds_obj: Any) -> list[dict[str, Any]]:
-        if isinstance(ds_obj, (DatasetDict, IterableDatasetDict)):
-            rows: list[dict[str, Any]] = []
-            for split in ds_obj.keys():
-                rows.extend(list(ds_obj[split]))
-            return rows
-        if isinstance(ds_obj, (Dataset, IterableDataset)):
-            return list(ds_obj)
-        return []
-
-    def _load_adversarial_examples(self) -> list[str]:
-        logger.info("Loading adversarial dataset JailbreakBench/JBB-Behaviors")
-        try:
-            ds = load_dataset("JailbreakBench/JBB-Behaviors", "behaviors")
-        except Exception:
-            ds = load_dataset("JailbreakBench/JBB-Behaviors")
-
-        rows: list[dict[str, Any]] = []
-        if isinstance(ds, (DatasetDict, IterableDatasetDict)) and "harmful" in ds:
-            rows = list(ds["harmful"])
-        else:
-            rows = self._iter_rows(ds)
-
-        texts: list[str] = []
-        for row in rows:
-            text = self._extract_text(
-                row,
-                (
-                    "Behavior",
-                    "Goal",
-                    "goal",
-                    "prompt",
-                    "Prompt",
-                    "query",
-                    "instruction",
-                    "text",
-                ),
-            )
-            if text:
-                texts.append(text)
-
-        logger.info("Loading adversarial dataset jackhhao/jailbreak-classification")
-        jb_ds = load_dataset("jackhhao/jailbreak-classification")
-        jb_rows = self._iter_rows(jb_ds)
-
-        for row in jb_rows:
-            prompt_value = row.get("prompt")
-            if not isinstance(prompt_value, str):
-                continue
-
-            prompt_text = prompt_value.strip()
-            if not prompt_text:
-                continue
-
-            is_adversarial = (
-                str(row.get("type", "")).strip().lower() == "jailbreak"
-            )
-
-            if is_adversarial:
-                texts.append(prompt_text)
-
-        logger.info("Loading adversarial dataset deepset/prompt-injections")
-        deepset_ds = load_dataset("deepset/prompt-injections")
-        deepset_rows = self._iter_rows(deepset_ds)
-
-        for row in deepset_rows:
-            text_value = row.get("text")
-            if not isinstance(text_value, str):
-                continue
-
-            prompt_text = text_value.strip()
-            if not prompt_text:
-                continue
-
-            if row.get("label") == 1:
-                texts.append(prompt_text)
-
-        logger.info("Loading adversarial dataset neuralchemy/Prompt-injection-dataset (core)")
-        neuralchemy_ds = load_dataset("neuralchemy/Prompt-injection-dataset", "core")
-        neuralchemy_rows = self._iter_rows(neuralchemy_ds)
-
-        for row in neuralchemy_rows:
-            text_value = row.get("text")
-            if not isinstance(text_value, str):
-                continue
-
-            prompt_text = text_value.strip()
-            if not prompt_text:
-                continue
-
-            if row.get("label") == 1:
-                texts.append(prompt_text)
-
-        logger.info("Loading adversarial dataset Simsonsun/JailbreakPrompts")
-        simsonsun_ds = load_dataset("Simsonsun/JailbreakPrompts")
-
-        for split_name in ("Dataset_1", "Dataset_2"):
-            if isinstance(simsonsun_ds, (DatasetDict, IterableDatasetDict)) and split_name in simsonsun_ds:
-                for row in simsonsun_ds[split_name]:
-                    prompt_value = row.get("Prompt")
-                    if isinstance(prompt_value, str):
-                        prompt_text = prompt_value.strip()
-                        if prompt_text:
-                            texts.append(prompt_text)
-
-        logger.info("Loading adversarial dataset TrustAIRLab/in-the-wild-jailbreak-prompts (jailbreak_2023_12_25)")
-        trustair_ds = load_dataset("TrustAIRLab/in-the-wild-jailbreak-prompts", "jailbreak_2023_12_25")
-        trustair_rows = self._iter_rows(trustair_ds)
-
-        for row in trustair_rows:
-            prompt_value = row.get("prompt")
-            if not isinstance(prompt_value, str):
-                continue
-
-            prompt_text = prompt_value.strip()
-            if not prompt_text:
-                continue
-
-            if row.get("jailbreak") == True:
-                texts.append(prompt_text)
-
-        return list(dict.fromkeys(texts))
-
-    def _load_benign_examples(self) -> list[str]:
-        logger.info("Loading benign dataset OpenAssistant/oasst1")
-        ds = load_dataset("OpenAssistant/oasst1")
-
-        rows = self._iter_rows(ds)
-        texts: list[str] = []
-        for row in rows:
-            lang = row.get("lang")
-            if isinstance(lang, str) and lang and not lang.lower().startswith("en"):
-                continue
-
-            role = row.get("role")
-            if isinstance(role, str) and role.lower() not in {"prompter", "user", "human"}:
-                continue
-
-            text = self._extract_text(
-                row,
-                (
-                    "text",
-                    "prompt",
-                    "instruction",
-                    "message",
-                    "content",
-                ),
-            )
-            if text:
-                texts.append(text)
-
-        logger.info("Loading benign dataset yahma/alpaca-cleaned")
-        alpaca_ds = load_dataset("yahma/alpaca-cleaned")
-        alpaca_rows = self._iter_rows(alpaca_ds)
-        for row in alpaca_rows:
-            instruction = row.get("instruction", "")
-            input_text = row.get("input", "")
-            if instruction and isinstance(instruction, str):
-                combined = instruction.strip()
-                if input_text and isinstance(input_text, str):
-                    combined = combined + " " + input_text.strip()
-                if combined:
-                    texts.append(combined)
-
-        return list(dict.fromkeys(texts))
+    def _try_decode_base64(prompt: str) -> str:
+        import base64, re
+        pattern = re.compile(r'^[A-Za-z0-9+/]{24,}={0,2}$')
+        stripped = prompt.strip()
+        if pattern.match(stripped):
+            try:
+                return base64.b64decode(stripped).decode('utf-8')
+            except Exception:
+                return prompt
+        return prompt
 
     @staticmethod
-    def _sample_to_count(items: list[str], count: int, seed: int) -> list[str]:
-        if len(items) <= count:
-            return items
-        rng = random.Random(seed)
-        return rng.sample(items, count)
+    def _base64_signal(prompt: str) -> float:
+        matches = BASE64_PATTERN.findall(prompt)
+        if not matches:
+            return 0.0
+        return 1.0
+
+    @staticmethod
+    def _persona_signal(prompt: str) -> float:
+        hits = sum(1 for pattern in PERSONA_PATTERNS if pattern.search(prompt))
+        return 1.0 if hits >= 1 else 0.0
+
+    @staticmethod
+    def _length_signal(prompt: str) -> float:
+        return 1.0 if len(prompt) > 1500 else 0.0
 
     def _prepare_model(self) -> None:
-        if MODEL_PATH.exists():
-            loaded = joblib.load(MODEL_PATH)
-            self._model = loaded["model"]
-            self._embedder = SentenceTransformer(FINETUNED_MODEL)
-            self._trained = True
-            logger.info("Loaded pre-trained classifier from disk — skipping retraining")
-            return
-
-        if self._trained:
+        if self._ready:
             return
 
         with self._lock:
-            if self._trained:
+            if self._ready:
                 return
 
-            adversarial = self._load_adversarial_examples()
-            benign_pool = self._load_benign_examples()
+            logger.info("Loading adversarial and benign datasets from HuggingFace...")
 
-            if not adversarial:
-                raise RuntimeError("No adversarial examples loaded from JailbreakBench/JBB-Behaviors")
-            if not benign_pool:
-                raise RuntimeError("No benign examples loaded from OpenAssistant/oasst1")
+            # Local imports keep startup lightweight and avoid impacting existing endpoints.
+            from datasets import load_dataset
+            from sentence_transformers import SentenceTransformer
 
-            adversarial_sample = adversarial  # use all adversarial examples
-            texts = benign_pool
-            benign_sample = self._sample_to_count(benign_pool, min(45000, len(texts)), seed=42)
-            target_count = len(adversarial_sample)
+            if MODEL_PATH.exists():
+                loaded = joblib.load(MODEL_PATH)
+                self._classifier = loaded["model"]
+                self._embedder = SentenceTransformer("MohitML10/jailbreak-detector-finetuned")
+                self._ready = True
+                logger.info("Loaded classifier model from disk")
+                return
 
-            texts = adversarial_sample + benign_sample
-            labels = [1] * len(adversarial_sample) + [0] * len(benign_sample)
+            def _iter_rows(ds_obj: Any) -> list[dict[str, Any]]:
+                if isinstance(ds_obj, dict):
+                    rows: list[dict[str, Any]] = []
+                    for split_name in ds_obj:
+                        rows.extend(list(ds_obj[split_name]))
+                    return rows
+                return list(ds_obj)
 
-            logger.info(
-                "Training jailbreak classifier with %d adversarial and %d benign examples",
-                len(adversarial_sample),
-                len(benign_sample),
-            )
+            adversarial_texts: list[str] = []
 
-            self._embedder = SentenceTransformer(FINETUNED_MODEL)
+            jb_ds = load_dataset("JailbreakBench/JBB-Behaviors", "behaviors")
+            jb_rows: list[dict[str, Any]] = []
+            if isinstance(jb_ds, dict) and "harmful" in jb_ds:
+                jb_rows = list(jb_ds["harmful"])
+            else:
+                jb_rows = _iter_rows(jb_ds)
+            for row in jb_rows:
+                goal = row.get("Goal")
+                behavior = row.get("Behavior")
+                text_value = goal if isinstance(goal, str) and goal.strip() else behavior
+                if isinstance(text_value, str):
+                    text = text_value.strip()
+                    if text:
+                        adversarial_texts.append(text)
+
+            jackhhao_ds = load_dataset("jackhhao/jailbreak-classification")
+            for row in _iter_rows(jackhhao_ds):
+                if str(row.get("type", "")).strip().lower() != "jailbreak":
+                    continue
+                prompt = row.get("prompt")
+                if isinstance(prompt, str):
+                    text = prompt.strip()
+                    if text:
+                        adversarial_texts.append(text)
+
+            deepset_ds = load_dataset("deepset/prompt-injections")
+            for row in _iter_rows(deepset_ds):
+                if row.get("label") != 1:
+                    continue
+                text_value = row.get("text")
+                if isinstance(text_value, str):
+                    text = text_value.strip()
+                    if text:
+                        adversarial_texts.append(text)
+
+            neuralchemy_ds = load_dataset("neuralchemy/Prompt-injection-dataset", "core")
+            for row in _iter_rows(neuralchemy_ds):
+                if row.get("label") != 1:
+                    continue
+                text_value = row.get("text")
+                if isinstance(text_value, str):
+                    text = text_value.strip()
+                    if text:
+                        adversarial_texts.append(text)
+
+            simsonsun_ds = load_dataset("Simsonsun/JailbreakPrompts")
+            if isinstance(simsonsun_ds, dict):
+                for split_name in ("Dataset_1", "Dataset_2"):
+                    if split_name not in simsonsun_ds:
+                        continue
+                    for row in simsonsun_ds[split_name]:
+                        prompt = row.get("Prompt")
+                        if isinstance(prompt, str):
+                            text = prompt.strip()
+                            if text:
+                                adversarial_texts.append(text)
+
+            trustair_ds = load_dataset("TrustAIRLab/in-the-wild-jailbreak-prompts", "jailbreak_2023_12_25")
+            for row in _iter_rows(trustair_ds):
+                if row.get("jailbreak") is not True:
+                    continue
+                prompt = row.get("prompt")
+                if isinstance(prompt, str):
+                    text = prompt.strip()
+                    if text:
+                        adversarial_texts.append(text)
+
+            adversarial_texts = list(dict.fromkeys(adversarial_texts))
+
+            benign_texts: list[str] = []
+
+            oasst_ds = load_dataset("OpenAssistant/oasst1")
+            for row in _iter_rows(oasst_ds):
+                if str(row.get("role", "")).strip().lower() != "prompter":
+                    continue
+                text_value = row.get("text")
+                if isinstance(text_value, str):
+                    text = text_value.strip()
+                    if text:
+                        benign_texts.append(text)
+
+            alpaca_ds = load_dataset("yahma/alpaca-cleaned")
+            for row in _iter_rows(alpaca_ds):
+                instruction = row.get("instruction")
+                if isinstance(instruction, str):
+                    text = instruction.strip()
+                    if text:
+                        benign_texts.append(text)
+
+            benign_texts = list(dict.fromkeys(benign_texts))
+            benign_count = min(45000, len(benign_texts))
+            benign_sample = random.Random(42).sample(benign_texts, benign_count)
+
+            if not adversarial_texts:
+                raise RuntimeError("No adversarial texts found in configured datasets")
+            if not benign_sample:
+                raise RuntimeError("No benign texts found in configured datasets")
+
+            texts = adversarial_texts + benign_sample
+            labels = [1] * len(adversarial_texts) + [0] * len(benign_sample)
+
+            logger.info("Loading embedding model sentence-transformers/all-MiniLM-L6-v2...")
+            self._embedder = SentenceTransformer("MohitML10/jailbreak-detector-finetuned")
+
+            logger.info("Embedding training dataset...")
             X = self._embedder.encode(
                 texts,
                 batch_size=64,
@@ -287,105 +231,67 @@ class JailbreakClassifierService:
                 convert_to_numpy=True,
                 normalize_embeddings=True,
             )
-            y = labels
 
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y
+                X,
+                labels,
+                test_size=0.2,
+                random_state=42,
+                stratify=labels,
             )
 
-            self._model = XGBClassifier(
+            logger.info("Training XGBoost classifier...")
+            self._classifier = XGBClassifier(
                 n_estimators=200,
                 max_depth=4,
                 learning_rate=0.1,
                 eval_metric="logloss",
-                random_state=42
+                random_state=42,
             )
-            self._model.fit(X_train, y_train)
+            self._classifier.fit(X_train, y_train)
 
-            y_pred = self._model.predict(X_test)
+            y_pred = self._classifier.predict(X_test)
             f1 = f1_score(y_test, y_pred)
             cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
             tn, fp, fn, tp = cm.ravel()
-
             tpr = tp / (tp + fn) if (tp + fn) else 0.0
             fpr = fp / (fp + tn) if (fp + tn) else 0.0
 
             logger.info("F1 score: %.6f", f1)
-            logger.info("Confusion matrix: %s", cm.tolist())
             logger.info("True Positive Rate (TPR): %.6f", tpr)
             logger.info("False Positive Rate (FPR): %.6f", fpr)
 
-            joblib.dump({"model": self._model}, MODEL_PATH)
-            logger.info("Model saved to %s", MODEL_PATH)
-            self._trained = True
+            joblib.dump({"model": self._classifier}, MODEL_PATH)
 
-    @staticmethod
-    def _base64_signal(prompt: str) -> float:
-        matches = BASE64_PATTERN.findall(prompt)
-        if not matches:
-            return 0.0
+            self._ready = True
+            logger.info("Jailbreak prompt classifier is ready")
 
-        valid_count = 0
-        for token in matches:
-            cleaned = token.strip()
-            if len(cleaned) < 24:
-                continue
-            if len(cleaned) % 4 != 0:
-                continue
-            if re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", cleaned):
-                valid_count += 1
+    def classify(self, prompt: str) -> dict[str, Any]:
+        original_prompt = prompt
+        clean_prompt = original_prompt.strip()
+        clean_prompt = self._try_decode_base64(clean_prompt)
+        if not clean_prompt:
+            raise ValueError("Prompt cannot be empty")
 
-        return 1.0 if valid_count > 0 else 0.0
-
-    @staticmethod
-    def _persona_signal(prompt: str) -> float:
-        hits = sum(1 for pattern in PERSONA_PATTERNS if pattern.search(prompt))
-        if hits <= 0:
-            return 0.0
-        return 1.0 if hits >= 1 else 0.0
-
-    @staticmethod
-    def _length_signal(prompt: str) -> float:
-        return 1.0 if len(prompt) > 1500 else 0.0
-
-    def _embedding_signal(self, prompt: str) -> float:
-        if self._embedder is None or self._model is None:
-            raise RuntimeError("Classifier model is not initialized")
+        self._prepare_model()
 
         vector = self._embedder.encode(
-            [prompt],
+            [clean_prompt],
             show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=True,
         )
-        probability = float(self._model.predict_proba(vector)[0][1])
-        return max(0.0, min(1.0, probability))
 
-    def classify(self, prompt: str) -> dict[str, Any]:
-        prompt_clean = prompt.strip()
-        if not prompt_clean:
-            raise ValueError("Prompt cannot be empty")
+        probabilities = self._classifier.predict_proba(vector)[0]
+        class_to_prob = {
+            int(cls): float(prob)
+            for cls, prob in zip(self._classifier.classes_, probabilities)
+        }
 
-        def _try_decode_base64(prompt: str) -> str:
-            import re
-            pattern = re.compile(r'^[A-Za-z0-9+/]{24,}={0,2}$')
-            stripped = prompt.strip()
-            if pattern.match(stripped):
-                try:
-                    decoded = base64.b64decode(stripped).decode('utf-8')
-                    return decoded
-                except Exception:
-                    return prompt
-            return prompt
-
-        prompt_clean = _try_decode_base64(prompt_clean)
-
-        self._prepare_model()
-
-        embedding_signal = self._embedding_signal(prompt_clean)
-        base64_signal = self._base64_signal(prompt)
-        persona_signal = self._persona_signal(prompt)
-        length_signal = self._length_signal(prompt)
+        embedding_signal = class_to_prob.get(1, 0.0)
+        base64_signal = self._base64_signal(original_prompt)
+        persona_signal = self._persona_signal(original_prompt)
+        length_signal = self._length_signal(original_prompt)
 
         ensemble_score = (
             0.4 * embedding_signal
@@ -394,7 +300,6 @@ class JailbreakClassifierService:
             + 0.1 * length_signal
         )
         ensemble_score = max(0.0, min(1.0, ensemble_score))
-
         if ensemble_score >= 0.29:
             verdict = "ADVERSARIAL"
             confidence = ensemble_score
@@ -402,15 +307,12 @@ class JailbreakClassifierService:
             verdict = "SAFE"
             confidence = 1.0 - ensemble_score
 
+        prompt_hash = hashlib.sha256(original_prompt.encode("utf-8")).hexdigest()
+
         return {
             "verdict": verdict,
             "confidence": float(confidence),
-            "signals": {
-                "embedding": float(embedding_signal),
-                "base64": float(base64_signal),
-                "persona": float(persona_signal),
-                "length": float(length_signal),
-            },
+            "prompt_hash": prompt_hash,
         }
 
 
