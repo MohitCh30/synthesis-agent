@@ -84,9 +84,17 @@ class ClassifyRequest(BaseModel):
     prompt: str = Field(..., description="Prompt to classify")
 
 
+class ClassifySignals(BaseModel):
+    embedding: float
+    persona: float
+    base64: float
+    length: float
+
+
 class ClassifyResponse(BaseModel):
     verdict: str = Field(..., description="SAFE or ADVERSARIAL")
     confidence: float = Field(..., ge=0.0, le=1.0)
+    signals: ClassifySignals
     prompt_hash: str = Field(..., min_length=64, max_length=64)
 
 
