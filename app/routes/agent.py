@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse
+from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse, ClassifySignals
 from app.services.llm import llm_service
 from app.services.logger import logger_service
 from app.services.constraints import parse_constraints, detect_contradictions, validate_output, calculate_trust_score
@@ -187,6 +187,12 @@ async def classify_prompt(request: ClassifyRequest):
         return ClassifyResponse(
             verdict=result["verdict"],
             confidence=result["confidence"],
+            signals=ClassifySignals(
+                embedding=result["signals"]["embedding"],
+                persona=result["signals"]["persona"],
+                base64=result["signals"]["base64"],
+                length=result["signals"]["length"]
+            ),
             prompt_hash=result["prompt_hash"]
         )
 
