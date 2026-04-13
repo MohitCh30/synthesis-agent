@@ -312,6 +312,12 @@ class JailbreakClassifierService:
         return {
             "verdict": verdict,
             "confidence": float(confidence),
+            "signals": {
+                "embedding": float(embedding_signal),
+                "persona": float(persona_signal),
+                "base64": float(base64_signal),
+                "length": float(length_signal),
+            },
             "prompt_hash": prompt_hash,
         }
 
