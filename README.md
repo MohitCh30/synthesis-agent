@@ -1,7 +1,7 @@
 ## 🚨 Prompt Police — Jailbreak Detection System
 
-**Live API:** https://web-production-a7b03.up.railway.app/  
-**Interactive Docs:** https://web-production-a7b03.up.railway.app/docs  
+**Live API:** https://api,mohitchdev.me/
+**Interactive Docs:** https://api.mohitchdev.me/docs 
 **HuggingFace Model:** https://huggingface.co/MohitML10/jailbreak-detector-finetuned  
 **GitHub:** https://github.com/MohitCh30/synthesis-agent
 
