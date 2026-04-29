@@ -32,3 +32,4 @@ build/
 __pycache__/
 *.pyc
 app/db/agent_logs.db
+models/
