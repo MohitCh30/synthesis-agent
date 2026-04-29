@@ -6,13 +6,14 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
-from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse, ClassifySignals
+from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse, ClassifySignals, PIIFilterRequest, PIIFilterResponse
 from app.services.llm import llm_service
 from app.services.logger import logger_service
 from app.services.constraints import parse_constraints, detect_contradictions, validate_output, calculate_trust_score
 from app.services.verifier import compute_execution_hash, verify_execution
 from app.services.blockchain import store_execution_onchain
 from app.services.classifier import classifier_service
+from app.services.pii_filter import pii_filter_service
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 logger = logging.getLogger(__name__)
@@ -201,6 +202,21 @@ async def classify_prompt(request: ClassifyRequest):
     except Exception as e:
         logger.error(f"Prompt classification failed: task_id={task_id}, error={str(e)}")
         raise HTTPException(status_code=500, detail=f"Classification failed: {str(e)}")
+
+
+@router.post("/filter", response_model=PIIFilterResponse)
+async def filter_pii(request: PIIFilterRequest):
+    text = request.text
+    if len(text.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    result = pii_filter_service.filter_pii(text)
+    return PIIFilterResponse(
+        has_pii=result["has_pii"],
+        pii_types=result["pii_types"],
+        redacted=result["redacted"],
+        entities=result["entities"],
+    )
 
 
 @router.get("/verify/{task_id}", response_model=VerificationResponse)

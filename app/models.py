@@ -98,6 +98,17 @@ class ClassifyResponse(BaseModel):
     prompt_hash: str = Field(..., min_length=64, max_length=64)
 
 
+class PIIFilterRequest(BaseModel):
+    text: str
+
+
+class PIIFilterResponse(BaseModel):
+    has_pii: bool
+    pii_types: list[str]
+    redacted: str
+    entities: list[dict]
+
+
 class ErrorResponse(BaseModel):
     error: str
     status: str
