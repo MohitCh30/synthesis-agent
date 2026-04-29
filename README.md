@@ -29,7 +29,9 @@ Incoming Text
 ```
 
 **Live API:** https://api.mohitchdev.me/docs
+
 **HuggingFace Model:** https://huggingface.co/MohitML10/jailbreak-detector-finetuned
+
 **GitHub:** https://github.com/MohitCh30/synthesis-agent
 
 ---
