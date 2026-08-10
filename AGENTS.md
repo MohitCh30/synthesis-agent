@@ -10,7 +10,12 @@
 
 ## Live Endpoints
 
-**Base URL:** https://web-production-a7b03.up.railway.app
+Deployment is self-hosted, exposed through a Cloudflare Tunnel (the Railway
+URLs below are from the previous deployment).
+The origin must only accept traffic from the tunnel — direct-to-origin access
+would let clients spoof `CF-Connecting-IP` and bypass per-IP rate limiting.
+
+**Base URL:** https://web-production-a7b03.up.railway.app (previous Railway deployment)
 **Swagger UI:** https://web-production-a7b03.up.railway.app/docs
 **Health Check:** GET https://web-production-a7b03.up.railway.app/
 
@@ -53,6 +58,30 @@ GET https://web-production-a7b03.up.railway.app/agent/history
 ```
 
 Returns append-only log of all executions with trust scores and hashes.
+
+---
+
+## API Protections
+
+- **Rate limiting** — per-IP sliding-window limits (no external dependency):
+  `/agent/run` 10/min, `/agent/classify` 30/min, `/agent/filter` 30/min, other `/agent/*` reads 60/min.
+  Returns 429 with `Retry-After`. Tunable via `RATE_LIMIT_*_PER_MINUTE` env vars.
+  Client IP comes from Cloudflare's `CF-Connecting-IP` header (trustworthy through the tunnel);
+  client-supplied `X-Forwarded-For` is ignored as spoofable. Uvicorn must run with
+  `--no-proxy-headers` (see Procfile) — otherwise uvicorn itself honors spoofed
+  `X-Forwarded-For` from loopback peers and rewrites `request.client` before middleware runs.
+- **Model allowlist** — `AgentRequest.model` is restricted to plain chat models
+  (`GROQ_ALLOWED_MODELS`, default `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`).
+  Agentic Groq models with built-in server-side URL-visit/search tools are rejected
+  to prevent provider-side URL fetching triggered by clients. The application server
+  itself never fetches URLs from user input.
+- **DELETE /agent/logs/{task_id}** — gated behind `X-Admin-Key` header matching the `ADMIN_API_KEY`
+  env var. If `ADMIN_API_KEY` is not set, deletion returns 403. This protects the append-only
+  audit trail that `/agent/verify` and on-chain anchoring depend on.
+- **Input bounds** — prompt/text fields limited to 8000 chars; `limit` 1–200 and `offset >= 0` on `/agent/logs`.
+- **Error handling** — upstream provider error details are logged server-side only; API responses
+  and stored log reasons use generic messages.
+- **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` on all responses.
 
 ---
 

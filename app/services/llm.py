@@ -9,6 +9,28 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "llama-3.1-8b-instant"
 
 
+def _allowed_models() -> set[str]:
+    """Chat models clients may select via AgentRequest.model.
+
+    Only plain chat models without built-in server-side tooling are allowed.
+    Agentic models (e.g. groq/compound*) can execute server-side `visit`/search
+    tool calls against client-supplied URLs (provider-side SSRF, billed to our
+    key), so they are excluded. Override via GROQ_ALLOWED_MODELS (comma-sep).
+    """
+    raw = os.getenv("GROQ_ALLOWED_MODELS")
+    if raw:
+        return {m.strip() for m in raw.split(",") if m.strip()}
+    return {DEFAULT_MODEL, "llama-3.3-70b-versatile"}
+
+
+def validate_model(model: str) -> str:
+    if model not in _allowed_models():
+        raise ValueError(
+            f"Model '{model}' is not allowed. Allowed models: {sorted(_allowed_models())}"
+        )
+    return model
+
+
 class LLMService:
     def __init__(self, api_key: str = None):
         self.api_key = api_key
@@ -51,7 +73,7 @@ class LLMService:
         max_tokens: int = 100,
         temperature: float = 0.7
     ) -> dict:
-        model = model or DEFAULT_MODEL
+        model = validate_model(model) if model else DEFAULT_MODEL
         client = self.get_client()
 
         messages = []

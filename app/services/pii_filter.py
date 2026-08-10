@@ -42,7 +42,8 @@ class PIIFilterService:
                     "token-classification",
                     model="openai/privacy-filter",
                     device="cpu",
-                    trust_remote_code=True,
+                    # No trust_remote_code: model is a standard architecture and
+                    # loads fine without executing code from the model repo.
                 )
             except Exception as exc:
                 logger.error("Failed to load PII model: %s", exc)

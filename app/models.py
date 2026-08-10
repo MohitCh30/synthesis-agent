@@ -6,12 +6,13 @@ from pydantic import BaseModel, Field
 
 
 class AgentRequest(BaseModel):
-    input: str = Field(..., description="Task input prompt")
+    input: str = Field(..., min_length=1, max_length=8000, description="Task input prompt")
     system_prompt: Optional[str] = Field(
         default="You are a Trustworthy AI Agent. Execute the task and honor all constraints. Be precise and honest.",
+        max_length=4000,
         description="Optional system prompt"
     )
-    model: str = Field(default="llama-3.1-8b-instant", description="Groq model to use")
+    model: str = Field(default="llama-3.1-8b-instant", max_length=100, description="Groq model to use")
 
 
 class ConstraintsInfo(BaseModel):
@@ -81,7 +82,7 @@ class HealthResponse(BaseModel):
 
 
 class ClassifyRequest(BaseModel):
-    prompt: str = Field(..., description="Prompt to classify")
+    prompt: str = Field(..., min_length=1, max_length=8000, description="Prompt to classify")
 
 
 class ClassifySignals(BaseModel):
@@ -99,7 +100,7 @@ class ClassifyResponse(BaseModel):
 
 
 class PIIFilterRequest(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=8000)
 
 
 class PIIFilterResponse(BaseModel):

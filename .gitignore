@@ -1,36 +1,67 @@
-# Environment
+# =========================
+# Environment / Secrets
+# =========================
 .env
 .env.local
 .env.*.local
 
-# Node
-node_modules/
-
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
+env/
 
-# Logs
-logs/*.db
+# =========================
+# Runtime / Local Data
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+logs/
 
+# =========================
+# Local Models
+# =========================
+models/
+
+# =========================
+# Local Agent Tooling
+# =========================
+.opencodeignore
+
+# =========================
+# Local Repair / Backup Files
+# =========================
+environment-before-repair.txt
+requirements.backup.txt
+
+# =========================
+# Node
+# =========================
+node_modules/
+
+# =========================
 # IDE
+# =========================
 .vscode/
 .idea/
 *.swp
 *.swo
 
+# =========================
+# Build
+# =========================
+dist/
+build/
+
+# =========================
 # OS
+# =========================
 .DS_Store
 Thumbs.db
 
-# Build
-dist/
-build/
-__pycache__/
-*.pyc
-app/db/agent_logs.db
-models/
-models/
+Procfile

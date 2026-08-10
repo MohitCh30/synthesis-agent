@@ -8,6 +8,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.middleware import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.routes.agent import router as agent_router
 from app.models import HealthResponse
 from app.services.llm import llm_service, DEFAULT_MODEL
@@ -29,10 +30,15 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # browsers reject credentials with wildcard origins anyway
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Ordering note: Starlette runs the LAST added middleware first (outermost).
+# SecurityHeaders outermost so error responses (incl. 429s) get headers;
+# RateLimit inside; CORSMiddleware innermost so preflights reach it.
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(agent_router)
 

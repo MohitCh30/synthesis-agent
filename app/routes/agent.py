@@ -1,13 +1,14 @@
+import hmac
 import time
 import logging
 import os
 from uuid import uuid4
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from app.models import AgentRequest, AgentResponse, LogResponse, ConstraintsInfo, VerificationResponse, ErrorResponse, OnChainProof, ClassifyRequest, ClassifyResponse, ClassifySignals, PIIFilterRequest, PIIFilterResponse
-from app.services.llm import llm_service
+from app.services.llm import llm_service, validate_model
 from app.services.logger import logger_service
 from app.services.constraints import parse_constraints, detect_contradictions, validate_output, calculate_trust_score
 from app.services.verifier import compute_execution_hash, verify_execution
@@ -38,6 +39,11 @@ async def run_agent(request: AgentRequest):
 
     if contradiction_detected:
         logger.warning(f"Contradiction detected: {contradiction_reason}")
+
+    try:
+        validate_model(request.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     start_time = time.perf_counter()
 
@@ -136,7 +142,7 @@ async def run_agent(request: AgentRequest):
             latency_ms=latency_ms,
             status="error",
             valid=False,
-            reason=str(e),
+            reason="LLM execution failed",
             trust_score=0.0,
             trust_explanation="Execution failed",
             max_lines=constraints.get("max_lines"),
@@ -147,12 +153,12 @@ async def run_agent(request: AgentRequest):
             format_constraint=constraints.get("format"),
             contradiction_detected=contradiction_detected,
             contradiction_reason=contradiction_reason,
-            violations=["Execution failed: " + str(e)]
+            violations=["Execution failed"]
         )
 
         logger.error(f"Task failed: task_id={task_id}, error={str(e)}")
 
-        raise HTTPException(status_code=500, detail=f"LLM execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="LLM execution failed")
 
 
 @router.post("/classify", response_model=ClassifyResponse)
@@ -201,7 +207,7 @@ async def classify_prompt(request: ClassifyRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Prompt classification failed: task_id={task_id}, error={str(e)}")
-        raise HTTPException(status_code=500, detail=f"Classification failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Classification failed")
 
 
 @router.post("/filter", response_model=PIIFilterResponse)
@@ -228,7 +234,10 @@ async def verify_task(task_id: str):
 
 
 @router.get("/logs", response_model=list[LogResponse])
-async def list_logs(limit: int = 50, offset: int = 0):
+async def list_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
     logs = logger_service.list_logs(limit=limit, offset=offset)
     return [_log_to_response(log) for log in logs]
 
@@ -264,7 +273,12 @@ def _log_to_response(log) -> LogResponse:
 
 
 @router.delete("/logs/{task_id}")
-async def delete_log(task_id: str):
+async def delete_log(task_id: str, x_admin_key: str = Header(default=None)):
+    # Destructive operation on the append-only audit trail: gated behind an
+    # admin key. If ADMIN_API_KEY is not configured, deletion is disabled.
+    admin_key = os.getenv("ADMIN_API_KEY")
+    if not admin_key or not x_admin_key or not hmac.compare_digest(x_admin_key, admin_key):
+        raise HTTPException(status_code=403, detail="Log deletion is not permitted")
     deleted = logger_service.delete_log(task_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Log not found: {task_id}")
