@@ -78,66 +78,59 @@ class PIIFilterService:
 
         try:
             raw_entities = self._pipeline(original_text)
-            entities: list[dict[str, Any]] = []
-            pii_types: list[str] = []
 
+            # Normalize every detection to (prefix, label, start, end).
+            # The privacy-filter model can label credential-like content
+            # inconsistently (e.g. B-account_number followed by I-secret), and
+            # continuation tokens (I-/E-) or bare labels carrying "secret" must
+            # not be dropped — a detected SECRET has to count as a finding.
+            normalized: list[tuple[str, str, int, int]] = []
             for item in raw_entities:
-                if isinstance(item, dict):
-                    entities.append(dict(item))
+                if not isinstance(item, dict):
+                    continue
+                tag = item.get("entity")
+                if not isinstance(tag, str) or not tag:
+                    continue
+                if tag[:2] in ("B-", "I-", "E-", "S-") and len(tag) > 2:
+                    prefix, _, label = tag.partition("-")
+                else:
+                    prefix, label = "S", tag  # bare label: treat as atomic
+                label = label.upper()
+                start = item.get("start")
+                end = item.get("end")
+                if not (isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(original_text)):
+                    continue
+                normalized.append((prefix, label, start, end))
+
+            pii_types: list[str] = []
+            for _, label, _, _ in normalized:
+                if label not in pii_types:
+                    pii_types.append(label)
+
+            # Merge adjacent entities into spans. Continuation prefixes (I-/E-)
+            # extend the open span regardless of the label on the token, so a
+            # detection whose label flips mid-span is redacted in full.
+            spans: list[tuple[int, int, str]] = []
+            current: list | None = None  # [start, end, label]
+            for prefix, label, start, end in normalized:
+                extends = (
+                    current is not None
+                    and prefix in ("I", "E")
+                    and start <= current[1]
+                )
+                if extends:
+                    current[1] = max(current[1], end)
+                else:
+                    if current is not None:
+                        spans.append((current[0], current[1], current[2]))
+                    current = [start, end, label]
+                if prefix == "E" and current is not None:
+                    spans.append((current[0], current[1], current[2]))
+                    current = None
+            if current is not None:
+                spans.append((current[0], current[1], current[2]))
 
             redacted = original_text
-            spans: list[tuple[int, int, str]] = []
-            idx = 0
-            while idx < len(entities):
-                entity = entities[idx]
-                tag = entity.get("entity")
-                if not isinstance(tag, str):
-                    idx += 1
-                    continue
-
-                base_label = entity["entity"].split("-", 1)[-1].upper() if entity["entity"].startswith(("B-", "S-")) else None
-                if base_label is not None and base_label not in pii_types:
-                    pii_types.append(base_label)
-
-                if not tag.startswith(("B-", "S-")):
-                    idx += 1
-                    continue
-
-                start = entity.get("start")
-                end = entity.get("end")
-                if not (isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(original_text)):
-                    idx += 1
-                    continue
-
-                if tag.startswith("S-"):
-                    spans.append((start, end, base_label or "PII"))
-                    idx += 1
-                    continue
-
-                span_end = end
-                j = idx + 1
-                while j < len(entities):
-                    next_entity = entities[j]
-                    next_tag = next_entity.get("entity")
-                    if not isinstance(next_tag, str):
-                        break
-                    next_base = next_tag.split("-", 1)[-1].upper() if "-" in next_tag else next_tag.upper()
-                    if next_base != (base_label or ""):
-                        break
-                    if next_tag.startswith(("I-", "E-")):
-                        next_end = next_entity.get("end")
-                        if isinstance(next_end, int) and next_end > span_end and next_end <= len(original_text):
-                            span_end = next_end
-                        if next_tag.startswith("E-"):
-                            j += 1
-                            break
-                        j += 1
-                        continue
-                    break
-
-                spans.append((start, span_end, base_label or "PII"))
-                idx = j
-
             for start, end, entity_type in sorted(spans, key=lambda x: (x[0], x[1]), reverse=True):
                 replacement = f"[REDACTED_{entity_type}]"
                 redacted = redacted[:start] + replacement + redacted[end:]

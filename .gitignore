@@ -65,3 +65,8 @@ build/
 Thumbs.db
 
 Procfile
+
+HackMSIT.txt
+
+# Security audit artifacts
+strix_runs/
